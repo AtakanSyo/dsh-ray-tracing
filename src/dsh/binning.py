@@ -69,6 +69,68 @@ def to_surface_brightness(image, bin_spec: BinSpec):
     return image / (solid_angle[:, None] * dt_width[None, :])
 
 
+def save_fits(image, bin_spec: BinSpec, path, metadata=None, overwrite=True):
+    """Write a (sky angle, time delay) halo image to a FITS file.
+
+    Requires ``astropy`` (``pip install dsh[fits]``).
+
+    The image is stored as the primary HDU's data array. Its axes are
+    *not* encoded as a standard FITS/WCS coordinate system, because
+    :func:`log_theta_bins` makes the sky-angle axis log-spaced and FITS WCS
+    has no standard linear-in-log axis type that would represent that
+    faithfully; forcing it into ``CDELT``/``CRVAL`` keywords would silently
+    mislabel the bin centers. Instead the *exact* bin edges are stored
+    losslessly in two accompanying binary table extensions, ``THETA_EDGES``
+    (radians) and ``DT_EDGES`` (seconds) -- reconstruct bin centers with
+    :func:`theta_bin_centers` or by averaging consecutive ``DT_EDGES``
+    entries. :func:`load_fits` reads a file written this way back into an
+    ``(image, bin_spec)`` pair.
+
+    Parameters
+    ----------
+    image : the 2D (n_theta, n_dt) image array (raw peel-off weights from
+        :attr:`dsh.tracer.TraceResult.image`, or the output of
+        :func:`to_surface_brightness` -- update ``metadata["BUNIT"]``
+        accordingly if you pass the latter).
+    bin_spec : the image's binning, see :class:`BinSpec`.
+    path : output file path (``.fits``).
+    metadata : optional dict of extra FITS header keywords, e.g.
+        ``{"D_PC": 3000, "TAU_SCA": 0.2, "E_KEV": 1.0, "NPHOTON": 200_000}``.
+    overwrite : whether to overwrite an existing file at ``path``.
+    """
+    from astropy.io import fits
+
+    header = fits.Header()
+    header["BUNIT"] = ("weight/photon/bin", "raw peeled-off weight per photon per bin")
+    header["AXIS1"] = ("dt [s], see DT_EDGES ext.", "NAXIS1, fastest-varying axis")
+    header["AXIS2"] = ("theta [rad], see THETA_EDGES ext.", "NAXIS2, log-spaced")
+    for key, value in (metadata or {}).items():
+        header[key] = value
+
+    primary = fits.PrimaryHDU(data=np.asarray(image, dtype=np.float32), header=header)
+    theta_hdu = fits.BinTableHDU.from_columns(
+        [fits.Column(name="theta_edges_rad", format="D", array=np.asarray(bin_spec.theta_edges, dtype=np.float64))],
+        name="THETA_EDGES",
+    )
+    dt_hdu = fits.BinTableHDU.from_columns(
+        [fits.Column(name="dt_edges_s", format="D", array=np.asarray(bin_spec.dt_edges, dtype=np.float64))],
+        name="DT_EDGES",
+    )
+    fits.HDUList([primary, theta_hdu, dt_hdu]).writeto(path, overwrite=overwrite)
+
+
+def load_fits(path):
+    """Read a FITS file written by :func:`save_fits` back into ``(image, bin_spec)``."""
+    from astropy.io import fits
+
+    with fits.open(path) as hdul:
+        image = np.asarray(hdul[0].data, dtype=np.float32)
+        theta_edges = np.asarray(hdul["THETA_EDGES"].data["theta_edges_rad"], dtype=np.float32)
+        dt_edges = np.asarray(hdul["DT_EDGES"].data["dt_edges_s"], dtype=np.float32)
+    bin_spec = BinSpec(theta_edges=jnp.asarray(theta_edges), dt_edges=jnp.asarray(dt_edges))
+    return image, bin_spec
+
+
 def accumulate(image, theta_sky, dt, weights, bin_spec: BinSpec):
     """Scatter-add ``weights`` into ``image`` at (theta_sky, dt), out-of-range safe."""
     te, de = bin_spec.theta_edges, bin_spec.dt_edges

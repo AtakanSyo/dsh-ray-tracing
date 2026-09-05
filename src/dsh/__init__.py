@@ -23,7 +23,7 @@ from . import (
     scatter,
     tracer,
 )
-from .binning import BinSpec, linear_dt_bins, log_theta_bins
+from .binning import BinSpec, linear_dt_bins, load_fits, log_theta_bins, save_fits
 from .cross_section import (
     ScatteringTables,
     build_scattering_tables,
@@ -62,9 +62,11 @@ __all__ = [
     "geometry",
     "grains",
     "linear_dt_bins",
+    "load_fits",
     "log_theta_bins",
     "mrn_distribution",
     "photon",
+    "save_fits",
     "scatter",
     "simulate",
     "thin_screen",

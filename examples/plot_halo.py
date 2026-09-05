@@ -1,14 +1,17 @@
-"""Trace a dust-scattering halo and plot its radial profile, light curve, and
-2D (angle, time) image. Requires matplotlib (``pip install dsh[plot]``).
+"""Trace a dust-scattering halo, plot it, and save it as a FITS image.
+
+Plotting requires matplotlib (``pip install dsh[plot]``); the FITS output
+requires astropy (``pip install dsh[fits]``) and is skipped with a warning
+if astropy isn't installed.
 
 Run with:
     python examples/plot_halo.py [output.png]
 """
 
 import sys
+from pathlib import Path
 
 import jax
-import jax.numpy as jnp
 import matplotlib.pyplot as plt
 import numpy as np
 
@@ -18,21 +21,45 @@ import dsh
 def main(out_path="halo.png"):
     key = jax.random.PRNGKey(0)
 
+    D_pc = 3000
+    E_keV = 1.0
+    tau_sca = 0.3
+    max_scatter_order = 15
+
     profile = dsh.uniform_slab(x_lo=0.3, x_hi=0.35)
     bin_spec = dsh.default_bin_spec(
         theta_min_arcsec=1, theta_max_arcsec=3 * 3600, n_theta=50, dt_min_s=0, dt_max_s=5e7, n_dt=50
     )
 
+    n_photons = 300_000
     result = dsh.simulate(
         key,
-        n_photons=300_000,
-        D_pc=3000,
-        E_keV=1.0,
-        tau_sca=0.3,
+        n_photons=n_photons,
+        D_pc=D_pc,
+        E_keV=E_keV,
+        tau_sca=tau_sca,
         profile=profile,
         bin_spec=bin_spec,
-        max_scatter_order=15,
+        max_scatter_order=max_scatter_order,
     )
+
+    fits_path = Path(out_path).with_suffix(".fits")
+    try:
+        dsh.save_fits(
+            result.image,
+            bin_spec,
+            fits_path,
+            metadata={
+                "D_PC": D_pc,
+                "E_KEV": E_keV,
+                "TAU_SCA": tau_sca,
+                "NPHOTON": n_photons,
+                "MAXORDER": max_scatter_order,
+            },
+        )
+        print(f"wrote {fits_path}")
+    except ImportError:
+        print("astropy not installed -- skipping FITS output (pip install dsh[fits])")
 
     image = np.asarray(result.image)
     theta_arcsec = np.asarray(dsh.binning.theta_bin_centers(bin_spec)) / dsh.constants.ARCSEC_TO_RAD

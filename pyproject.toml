@@ -26,7 +26,8 @@ dependencies = [
 [project.optional-dependencies]
 cuda = ["jax[cuda12]>=0.4.30"]
 plot = ["matplotlib>=3.7"]
-dev = ["pytest>=7.4", "matplotlib>=3.7", "ruff>=0.5"]
+fits = ["astropy>=5.3"]
+dev = ["pytest>=7.4", "matplotlib>=3.7", "astropy>=5.3", "ruff>=0.5"]
 
 [project.urls]
 Homepage = "https://github.com/AtakanSyo/dsh-ray-tracing"
