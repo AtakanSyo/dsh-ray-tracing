@@ -106,9 +106,33 @@ print(result.image.shape)              # (n_theta, n_dt)
 print(result.fraction_still_active)    # diagnostic: should be ~0 if max_scatter_order is high enough
 ```
 
-See `examples/quickstart.py` for a runnable version and `examples/plot_halo.py` for a plotting example (radial profile, light curve, and 2D image — needs `pip install -e ".[plot]"`).
+See `examples/quickstart.py` for a runnable version and `examples/plot_halo.py` for a plotting example (radial profile, light curve, and 2D angle/time image — needs `pip install -e ".[plot]"`).
 
 Because everything is plain JAX, the whole simulation is `jit`-compilable end to end and differentiable with respect to any continuous input (`D_pc`, `tau_sca`, the profile's parameters, ...) — useful for gradient-based fitting to real halo data.
+
+## Rendering what an observer actually sees
+
+`result.image` is a `(sky angle, time delay)` histogram, not a picture — because every dust profile here is azimuthally symmetric about the source direction, that 1D radial profile *is* the complete physical information, and `dsh.sky_image` re-expresses it on an actual `(x, y)` pixel grid in arcsec, optionally restricted to a time-delay window (a "snapshot"):
+
+```python
+# the whole halo, integrated over all time
+image2d, x_arcsec, y_arcsec = dsh.sky_image(result.image, bin_spec, extent_arcsec=3000, npix=201)
+
+# just the photons arriving in a particular time window (e.g. one exposure)
+snapshot, x_arcsec, y_arcsec = dsh.sky_image(
+    result.image, bin_spec, extent_arcsec=3000, npix=201, dt_min_s=2e7, dt_max_s=3e7
+)
+
+dsh.save_sky_image_fits(snapshot, extent_arcsec=3000, path="halo_snapshot.fits")
+```
+
+Because time delay scales as `theta^2`, a fixed time window picks out a fixed *ring* of radius — so successive snapshots show a ring expanding outward, the same signature seen in real observed dust echoes (see `examples/sky_image_demo.py`, which renders a time-integrated view alongside an early snapshot — a filled disk — and a late one — an expanding, hollow ring):
+
+```bash
+python examples/sky_image_demo.py
+```
+
+`dsh.save_fits` (the `(theta, dt)` histogram) and `dsh.save_sky_image_fits` (an `(x, y)` snapshot) both need `pip install -e ".[fits]"` (astropy); the latter writes a proper linear WCS (arcsec offsets from the source) since, unlike the log-spaced `theta` axis, pixel coordinates are genuinely linear.
 
 ## Project layout
 

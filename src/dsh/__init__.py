@@ -23,7 +23,16 @@ from . import (
     scatter,
     tracer,
 )
-from .binning import BinSpec, linear_dt_bins, load_fits, log_theta_bins, save_fits
+from .binning import (
+    BinSpec,
+    dt_window_sum,
+    linear_dt_bins,
+    load_fits,
+    log_theta_bins,
+    save_fits,
+    save_sky_image_fits,
+    sky_image,
+)
 from .cross_section import (
     ScatteringTables,
     build_scattering_tables,
@@ -57,6 +66,7 @@ __all__ = [
     "cross_section",
     "default_bin_spec",
     "dsigma_dOmega",
+    "dt_window_sum",
     "dust_model",
     "exponential_disk",
     "geometry",
@@ -67,8 +77,10 @@ __all__ = [
     "mrn_distribution",
     "photon",
     "save_fits",
+    "save_sky_image_fits",
     "scatter",
     "simulate",
+    "sky_image",
     "thin_screen",
     "total_cross_section",
     "tracer",

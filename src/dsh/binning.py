@@ -5,7 +5,7 @@ from typing import NamedTuple
 import jax.numpy as jnp
 import numpy as np
 
-from .constants import ARCSEC_TO_RAD
+from .constants import ARCSEC_TO_RAD, RAD_TO_ARCSEC
 
 
 class BinSpec(NamedTuple):
@@ -67,6 +67,114 @@ def to_surface_brightness(image, bin_spec: BinSpec):
     solid_angle = theta_bin_solid_angles(bin_spec)  # (n_theta,)
     dt_width = jnp.diff(bin_spec.dt_edges)  # (n_dt,)
     return image / (solid_angle[:, None] * dt_width[None, :])
+
+
+def dt_window_sum(image, bin_spec: BinSpec, dt_min_s=None, dt_max_s=None):
+    """Collapse the (theta, dt) image over time delay into a 1D radial profile.
+
+    With no bounds, this is the time-integrated (i.e. total) halo profile.
+    Pass ``dt_min_s``/``dt_max_s`` to instead select a single "snapshot":
+    a narrow window (comparable to one ``bin_spec.dt_edges`` bin width) for
+    "what the halo looks like at time delay ~t", or a wider one for "what
+    the halo looks like accumulated over a texposure window".
+    """
+    dt_centers = 0.5 * (bin_spec.dt_edges[:-1] + bin_spec.dt_edges[1:])
+    mask = jnp.ones_like(dt_centers, dtype=bool)
+    if dt_min_s is not None:
+        mask &= dt_centers >= dt_min_s
+    if dt_max_s is not None:
+        mask &= dt_centers <= dt_max_s
+    return jnp.sum(jnp.where(mask[None, :], image, 0.0), axis=1)
+
+
+def sky_image(image, bin_spec: BinSpec, extent_arcsec, npix=201, dt_min_s=None, dt_max_s=None):
+    """Render the halo as an actual (x, y) sky-plane image, in arcsec --
+    what an observer's detector would see -- rather than a 1D radial profile.
+
+    Every dust profile in :mod:`dsh.dust_model` depends only on the
+    line-of-sight coordinate, so the physical halo is exactly azimuthally
+    symmetric about the source direction: there is no information in the
+    azimuthal angle to simulate, and this function does not fabricate any
+    -- it takes the radial (and, optionally, time-windowed -- see
+    :func:`dt_window_sum`) profile already computed by the tracer and
+    re-expresses it on a square pixel grid via ``I(x, y) = I(r)`` with
+    ``r = sqrt(x^2 + y^2)``, interpolating log-linearly in radius (matching
+    the log-spaced angle bins). Pixels outside the tabulated angular range
+    (including the central pixel, if it falls inside the innermost bin
+    edge -- e.g. within the unresolved central point source) are 0.
+
+    Parameters
+    ----------
+    image : the (n_theta, n_dt) image (e.g. ``result.image``), or an
+        already time-collapsed 1D array of length n_theta (from
+        :func:`dt_window_sum` or :func:`to_surface_brightness` summed
+        yourself) -- either is accepted.
+    bin_spec : the image's binning.
+    extent_arcsec : half-width of the square field of view [arcsec]; the
+        output spans ``[-extent_arcsec, +extent_arcsec]`` in both x and y.
+    npix : output image is ``npix x npix``.
+    dt_min_s, dt_max_s : optional time-delay window, see :func:`dt_window_sum`
+        -- ignored if ``image`` is already 1D.
+
+    Returns
+    -------
+    image2d : (npix, npix) array, sky brightness.
+    x_arcsec, y_arcsec : (npix,) pixel-center coordinate arrays.
+    """
+    radial = image if jnp.ndim(image) == 1 else dt_window_sum(image, bin_spec, dt_min_s, dt_max_s)
+    theta_centers_arcsec = np.asarray(theta_bin_centers(bin_spec)) * RAD_TO_ARCSEC
+    radial = np.asarray(radial)
+
+    x_arcsec = np.linspace(-extent_arcsec, extent_arcsec, npix)
+    y_arcsec = np.linspace(-extent_arcsec, extent_arcsec, npix)
+    xx, yy = np.meshgrid(x_arcsec, y_arcsec)
+    r = np.sqrt(xx**2 + yy**2)
+
+    # log-linear interpolation, matching the log-spaced theta bins; floor r
+    # before taking its log (rather than clipping into range) so pixels
+    # genuinely below the smallest resolved angle -- including r=0 exactly,
+    # at the field center -- correctly fall on the "left" side and read 0,
+    # rather than being silently assigned the innermost bin's value.
+    log_r = np.log(np.maximum(r, theta_centers_arcsec[0] * 1e-6))
+    log_theta = np.log(theta_centers_arcsec)
+    image2d = np.interp(log_r, log_theta, radial, left=0.0, right=0.0).astype(np.float32)
+
+    return image2d, x_arcsec, y_arcsec
+
+
+def save_sky_image_fits(image2d, extent_arcsec, path, metadata=None, overwrite=True):
+    """Write a 2D (x, y) sky image from :func:`sky_image` as a FITS file
+    with a proper (linear, arcsec-offset) WCS -- unlike :func:`save_fits`,
+    an (x, y) sky image has genuinely linear axes, so a standard WCS is the
+    right (and DS9/astropy-viewer-friendly) way to describe it. There is no
+    real celestial pointing here (this is a simulation centered on the
+    source), so the axes are offsets in arcsec from the source, not RA/Dec.
+
+    Requires ``astropy`` (``pip install dsh[fits]``).
+    """
+    from astropy.io import fits
+
+    npix = image2d.shape[0]
+    header = fits.Header()
+    header["BUNIT"] = ("weight/photon/bin", "raw peeled-off weight per photon per bin")
+    header["WCSAXES"] = 2
+    header["CTYPE1"] = "LINEAR"
+    header["CTYPE2"] = "LINEAR"
+    header["CUNIT1"] = "arcsec"
+    header["CUNIT2"] = "arcsec"
+    header["CRPIX1"] = (npix + 1) / 2.0
+    header["CRPIX2"] = (npix + 1) / 2.0
+    header["CRVAL1"] = 0.0
+    header["CRVAL2"] = 0.0
+    header["CDELT1"] = 2.0 * extent_arcsec / (npix - 1)
+    header["CDELT2"] = 2.0 * extent_arcsec / (npix - 1)
+    header["COMMENT"] = "axes are arcsec offsets from the source, not celestial RA/Dec"
+    for key, value in (metadata or {}).items():
+        header[key] = value
+
+    fits.PrimaryHDU(data=np.asarray(image2d, dtype=np.float32), header=header).writeto(
+        path, overwrite=overwrite
+    )
 
 
 def save_fits(image, bin_spec: BinSpec, path, metadata=None, overwrite=True):
