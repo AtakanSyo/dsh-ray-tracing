@@ -1,0 +1,43 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "dsh"
+version = "0.1.0"
+description = "Differentiable, GPU-accelerated Monte Carlo ray tracer for X-ray dust-scattering halos, built on JAX."
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "MIT" }
+authors = [{ name = "AtakanSyo" }]
+keywords = ["astrophysics", "x-ray", "dust-scattering", "monte-carlo", "ray-tracing", "jax", "gpu"]
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "License :: OSI Approved :: MIT License",
+    "Intended Audience :: Science/Research",
+    "Topic :: Scientific/Engineering :: Astronomy",
+    "Topic :: Scientific/Engineering :: Physics",
+]
+dependencies = [
+    "jax>=0.4.30",
+    "numpy>=1.24",
+]
+
+[project.optional-dependencies]
+cuda = ["jax[cuda12]>=0.4.30"]
+plot = ["matplotlib>=3.7"]
+dev = ["pytest>=7.4", "matplotlib>=3.7", "ruff>=0.5"]
+
+[project.urls]
+Homepage = "https://github.com/AtakanSyo/dsh-ray-tracing"
+Issues = "https://github.com/AtakanSyo/dsh-ray-tracing/issues"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/dsh"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
